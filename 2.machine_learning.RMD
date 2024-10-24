@@ -1,0 +1,273 @@
+---
+title: "Credit Risk - Machine Learning"
+author: "Patrick Barcellos Maciel"
+date: "2024-10-20"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# 0) Configurações iniciais
+
+A princípio, limpa-se o ambiente, remove-se a notação científica e importa-se pacotes a serem utilizados.
+
+```{r warning=FALSE, message=FALSE}
+
+# 0.1) Limpando RStudio: Environment e Console
+rm(list = ls())
+cat("\014")
+
+# 0.2) Removendo notação científica
+options(scipen = 999)
+
+# 0.3) Importando pacotes necessários
+# Manipução de dados
+library(dplyr)
+# Visualizações
+library(ggplot2)
+# Particionamento de dados e avaliação de modelo
+library(caret)
+# Árvores de decisão
+library(rpart)
+library(rpart.plot)
+# Naive Bayes
+library(e1071)
+# Aprendizado Baseado em Instância (KNN)
+library(class)
+# Random Forest
+library(randomForest)
+
+```
+
+# 1) Preparação dos dados
+
+Antes de construir os modelos, os dados são divididos em dois conjuntos: treino (70%) e teste (30%). Essa separação é crucial para avaliar a performance dos modelos. O conjunto de treino é utilizado para ajustar o modelo e "ensinar" o algoritmo a reconhecer padrões nos dados. Já o conjunto de teste, que não foi visto durante o processo de treino, serve para avaliar a capacidade do modelo de generalizar suas previsões para novos dados. Essa divisão é fundamental para evitar o overfitting, que ocorre quando um modelo apresenta um desempenho excelente nos dados de treino, mas falha em fazer previsões precisas em dados não vistos.
+
+No contexto deste estudo, a variável "status_emprestimo" é o alvo da análise da capacidade de um indivíduo em cumprir suas obrigações financeiras, classificando-se em "0" para inadimplência e "1" para adimplência. Prever esses status capacita as instituições financeiras a gerenciar riscos, ajustar políticas de crédito e otimizar a tomada de decisões, além de fornecer insights sobre a saúde financeira dos clientes, sendo crucial para melhorar processos de concessão de crédito e reduzir perdas financeiras.
+
+```{r warning=FALSE, message=FALSE}
+
+# 1.1) Importando dataset
+base_tratada <- readRDS("data/outputs/base_tratada.rds")
+
+# 1.2) Definindo uma semente para garantir que a divisão aleatória dos dados 
+# seja replicável
+set.seed(123)
+
+# 1.3) Dividindo os dados em 70% para treino e 30% para teste
+index <- caret::createDataPartition(base_tratada$status_emprestimo, p = 0.7, list = FALSE)
+treino <- base_tratada[index, ]
+teste <- base_tratada[-index, ]
+
+# 1.4) Extraindo a variável dependente (target) do conjunto de treino e teste
+y_treino <- treino$status_emprestimo
+y_teste <- teste$status_emprestimo
+
+# 1.5) Extraindo as variáveis preditoras (features), excluindo a variável resposta
+x_treino <- treino %>% dplyr::select(-status_emprestimo)
+x_teste <- teste %>% dplyr::select(-status_emprestimo)
+
+```
+
+# 2) Árvore de Decisão
+
+As árvores de decisão são modelos de aprendizado supervisionado que utilizam uma estrutura em forma de árvore para representar decisões e suas consequências, dividindo os dados em subconjuntos com base em características que ajudam a prever um resultado. A construção envolve a escolha de um atributo para dividir os dados em cada nó, maximizando a homogeneidade dos subconjuntos resultantes com critérios como a Entropia ou o Índice de Gini, até alcançar nós terminais ou um critério de parada. O principal objetivo é classificar dados em categorias distintas ou prever valores contínuos.
+
+```{r warning=FALSE, message=FALSE}
+
+# 2.1) Estimando modelo de árvore de decisão
+modelo_arvore <- rpart::rpart(status_emprestimo ~ ., data = treino, method = "class")
+
+# 2.2) Exibindo resumo do modelo
+summary(modelo_arvore)
+
+# 2.3) Visualizando árvore
+rpart.plot::rpart.plot(modelo_arvore,
+                       # Mostrando caixas com probabilidades de classificação
+                       type = 3,
+                       # Mostrando porcentagem de acerto e gini nas caixas
+                       extra = 104,
+                       # Deixando os nós terminais alinhados na parte inferior
+                       fallen.leaves = TRUE,
+                       # Ajustando o tamanho do texto para facilitar a leitura
+                       cex = 0.6,
+                       # Utilizando uma paleta de cores para os nós
+                       box.palette = "Blues",
+                       # Definindo título do gráfico
+                       main = "Árvore de Decisão para Status de Empréstimo")
+
+# 2.4) Gerando previsões
+previsao_arvore <- stats::predict(modelo_arvore, newdata = x_teste, type = "class")
+
+# 2.5) Criando a matriz de confusão comparando previsões e valores observados
+matriz_confusao_arvore <- caret::confusionMatrix(as.factor(previsao_arvore), as.factor(y_teste))
+
+# 2.6) Exibindo a matriz de confusão
+matriz_confusao_arvore[["table"]]
+
+# 2.7) Obtendo o percentual de acertos
+acuracia <- matriz_confusao_arvore$overall["Accuracy"]
+
+# 2.8) Apresentando acurácia
+cat("Acurácia do modelo de Árvore de Decisão:", round(acuracia * 100, 2), "%\n")
+
+```
+
+# 3) Naive Bayes
+
+O Naive Bayes é um algoritmo de classificação baseado na Teoria de Bayes, que pressupõe a independência das características, dado a classe, simplificando o cálculo da probabilidade de uma amostra pertencer a uma determinada classe. O modelo é construído calculando as probabilidades a priori das classes e as probabilidades condicionais de cada característica, utilizando a fórmula de Bayes para determinar a classe mais provável para novas amostras. Seu objetivo é realizar classificações rápidas e eficientes, especialmente em grandes conjuntos de dados.
+
+```{r warning=FALSE, message=FALSE}
+
+# 3.1) Estimando modelo de árvore de decisão
+modelo_naive <- naiveBayes(status_emprestimo ~ ., data = treino)
+
+# 3.2) Exibindo resumo do modelo
+summary(modelo_naive)
+
+# 3.3) Gerando previsões
+previsao_naive <- predict(modelo_naive, newdata = x_teste)
+
+# 3.4) Criando a matriz de confusão comparando previsões e valores observados
+matriz_confusao_naive <- caret::confusionMatrix(as.factor(previsao_naive), as.factor(y_teste))
+
+# 3.5) Exibindo a matriz de confusão
+matriz_confusao_arvore[["table"]]
+
+# 3.6) Obtendo o percentual de acertos
+acuracia <- matriz_confusao_naive$overall["Accuracy"]
+
+# 3.7) Apresentando acurácia
+cat("Acurácia do modelo Naive Bayes:", round(acuracia * 100, 2), "%\n")
+
+```
+
+# 4) Aprendizado Baseado em Instância (KNN)
+
+O K-Nearest Neighbors (KNN) é um método de classificação que determina a classe de uma nova amostra com base nas classes das suas instâncias mais próximas no espaço de características, não requerendo um treinamento explícito. O algoritmo armazena todas as instâncias do conjunto de treinamento e, ao receber uma nova amostra, calcula a distância entre ela e as instâncias, selecionando os "k" vizinhos mais próximos, atribuindo a classe mais comum entre eles. O objetivo do KNN é fornecer uma classificação baseada em similaridade, sendo especialmente útil em cenários com relações complexas e não lineares, devido à sua simplicidade de implementação e interpretação.
+
+```{r warning=FALSE, message=FALSE}
+
+# 4.1) Definindo função para normalizar (escala entre 0 e 1)
+normalizar <- function(x) { return ((x - min(x)) / (max(x) - min(x))) }
+
+# 4.2) Identificando apenas as colunas numéricas para aplicar a normalização: 
+# retorna TRUE para colunas numéricas
+num_cols <- sapply(x_treino, is.numeric)
+
+# 4.3) Aplicando normalização apenas nas colunas numéricas
+x_treino_norm <- x_treino %>% 
+  # Selecionando apenas as colunas numéricas
+  select(which(num_cols)) %>%           
+  # Convertendo para dataframe
+  as.data.frame() %>% 
+  # Aplicando a função de normalização em cada coluna
+  lapply(normalizar) %>%
+  # Convertendo de volta para data frame
+  as.data.frame()
+
+# 4.4) Verificando se existem colunas categóricas para aplicar tratamento 
+# adequado: selecionando colunas não numéricas
+cat_cols <- x_treino %>% select(-which(num_cols))
+
+# 4.5) Aplicando one-hot encoding para variáveis categóricas (se necessário)
+x_treino_encoded <- caret::dummyVars(~ ., data = cat_cols) %>% 
+  predict(newdata = x_treino) %>% 
+  as.data.frame()
+
+# 4.6) Combinando as variáveis normalizadas com as variáveis categorizadas 
+# tratadas
+x_treino_final <- bind_cols(x_treino_norm, x_treino_encoded)
+
+# 4.7) Fazendo o mesmo para o conjunto de teste
+x_teste_norm <- x_teste %>%
+  select(which(num_cols)) %>%
+  as.data.frame() %>%
+  lapply(normalizar) %>%
+  as.data.frame()
+
+x_teste_encoded <- caret::dummyVars(~ ., data = cat_cols) %>%
+  predict(newdata = x_teste) %>%
+  as.data.frame()
+
+x_teste_final <- bind_cols(x_teste_norm, x_teste_encoded)
+
+# 4.8) Estimando modelo KNN
+previsao_knn <- class::knn(train = x_treino_norm, test = x_teste_norm, cl = y_treino, k = 5)
+
+# 4.9) Criando a matriz de confusão comparando previsões e valores observados
+matriz_confusao_knn <- caret::confusionMatrix(as.factor(previsao_knn), as.factor(y_teste))
+
+# 4.10) Exibindo a matriz de confusão
+matriz_confusao_knn[["table"]]
+
+# 4.11) Obtendo o percentual de acertos
+acuracia <- matriz_confusao_knn$overall["Accuracy"]
+
+# 4.12) Apresentando acurácia
+cat("Acurácia do modelo KNN:", round(acuracia * 100, 2), "%\n")
+
+```
+
+# 5) Random Forest
+
+O Random Forest é um método de aprendizado de ensemble que combina várias árvores de decisão para melhorar a precisão e evitar o overfitting. Cada árvore é treinada em um subconjunto aleatório dos dados, e a predição final é obtida pela média (para regressão) ou pela votação majoritária (para classificação) das previsões de todas as árvores. O modelo é construído gerando múltiplas árvores a partir de amostras aleatórias e selecionando aleatoriamente um subconjunto de características em cada nó de decisão, aumentando a diversidade entre as árvores. O objetivo é melhorar a precisão da classificação e reduzir a variabilidade das previsões, sendo amplamente eficaz em problemas complexos de classificação e regressão.
+
+```{r}
+
+# 5.1) Estimando modelo Random Forest
+modelo_rf <- randomForest(status_emprestimo ~ ., data = treino, ntree = 100)
+
+# 5.2) Exibindo resumo do modelo
+summary(modelo_rf)
+
+# 4.3) Gerando previsões
+previsao_rf <- predict(modelo_rf, newdata = x_teste)
+
+# 4.4) Criando a matriz de confusão comparando previsões e valores observados
+matriz_confusao_rf <- caret::confusionMatrix(as.factor(previsao_rf), as.factor(y_teste))
+
+# 4.5) Exibindo a matriz de confusão
+matriz_confusao_rf[["table"]]
+
+# 4.6) Obtendo o percentual de acertos
+acuracia <- matriz_confusao_rf$overall["Accuracy"]
+
+# 3.7) Apresentando acurácia
+cat("Acurácia do modelo Random Forest:", round(acuracia * 100, 2), "%\n")
+
+```
+
+# 6) Comparação da performance dos modelos de Machine Learning
+```{r}
+
+# 6.1) Obtendo acurácia do modelo de regressão linear
+modelo_rg <- data.frame(
+  modelo = "Regressão Logística",
+  acuracia = "86.79"
+)
+
+# 6.1) Criando dataframe com todos os resultados
+acuracias <- 
+  data.frame(modelo = c("Árvore de Decisão", "Naive Bayes", "KNN", "Random Forest"),
+             acuracia = c(matriz_confusao_arvore$overall["Accuracy"],
+                          matriz_confusao_naive$overall["Accuracy"],
+                          matriz_confusao_knn$overall["Accuracy"],
+                          matriz_confusao_rf$overall["Accuracy"])) %>% 
+  dplyr::mutate(acuracia = round(acuracia * 100, 2)) %>% 
+  rbind(modelo_rg) %>% 
+  dplyr::arrange(desc(acuracia))
+
+# Exibindo as acurácias de todos os modelos
+print(acuracias)
+
+```
+
+Conclui-se que o modelo Random Forest possui melhor acurácia entre os demais modelos.

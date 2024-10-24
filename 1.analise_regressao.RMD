@@ -1,0 +1,282 @@
+---
+title: "Credit Risk - Análise Exploratória e Regressão Logística"
+author: "Patrick Barcellos Maciel"
+date: "2024-10-16"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# 0) Configurações iniciais
+
+A princípio, limpa-se o ambiente, remove-se a notação científica e importa-se pacotes a serem utilizados.
+
+```{r warning=FALSE, message=FALSE}
+
+# 0.1) Limpando RStudio: Environment e Console
+rm(list = ls())
+cat("\014")
+
+# 0.2) Removendo notação científica
+options(scipen = 999)
+
+# 0.3) Importando pacotes necessários
+library(dplyr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(GGally)
+
+```
+
+# 1) Base de dados
+
+O conjunto de dados contém informações sobre indivíduos e seus históricos financeiros, focando em características que influenciam o risco de inadimplência em empréstimos. Tal base foi obtida no Kaggle.
+
+Link: https://www.kaggle.com/datasets/laotse/credit-risk-dataset
+
+```{r warning=FALSE, message=FALSE}
+
+# 1.1) Importando dataset
+base <- read.csv("data/inputs/credit_risk_dataset.csv")
+
+# 1.1) Tratando dataset
+
+# 1.1.2) Renomeando colunas
+base_renomeada <- 
+  base %>%
+  dplyr::rename(
+    idade = person_age,
+    renda_anual = person_income,
+    residencia = person_home_ownership,
+    tempo_emprego = person_emp_length,
+    intencao_emprestimo = loan_intent,
+    classificacao_emprestimo = loan_grade,
+    valor_emprestimo = loan_amnt,
+    taxa_juros_emprestimo = loan_int_rate,
+    status_emprestimo = loan_status,
+    percentual_renda_emprestimo = loan_percent_income,
+    historico_inadimplencia = cb_person_default_on_file,
+    duracao_historico_credito = cb_person_cred_hist_length
+  )
+
+# 1.1.2) Ajustando informações
+base_ajustada <- 
+  base_renomeada %>% 
+  dplyr::mutate(
+    residencia = case_when(
+      residencia == "RENT" ~ "aluguel",
+      residencia == "OWN" ~ "propria",
+      residencia == "MORTGAGE" ~ "hipoteca",
+      residencia == "OTHER" ~ "outro",
+      TRUE ~ residencia),
+    intencao_emprestimo = case_when(
+      intencao_emprestimo == "PERSONAL" ~ "pessoal",
+      intencao_emprestimo == "EDUCATION" ~ "educacao",
+      intencao_emprestimo == "MEDICAL" ~ "medico",
+      intencao_emprestimo == "VENTURE" ~ "empreendimento",
+      intencao_emprestimo == "HOMEIMPROVEMENT" ~ "melhoria_residencial",
+      intencao_emprestimo == "DEBTCONSOLIDATION" ~ "consolidacao_dividas",
+      TRUE ~ intencao_emprestimo),
+    historico_inadimplencia = case_when(
+      historico_inadimplencia == "Y" ~ 1,
+      historico_inadimplencia == "N" ~ 0
+      ) %>% as.numeric()
+    ) %>% 
+  dplyr::select(status_emprestimo, everything())
+
+```
+
+# 2) Tratamento dos dados
+
+```{r warning=FALSE, message=FALSE}
+
+# 2.1) Estatísticas descritivas para variáveis numéricas
+summary(base_ajustada %>% select(idade, renda_anual, tempo_emprego, valor_emprestimo, 
+                                 taxa_juros_emprestimo, percentual_renda_emprestimo, 
+                                 duracao_historico_credito))
+
+```
+
+A idade máxima registrada é de 144 anos, indicando um provável outlier, visto que a expectativa de vida média é de 77,5 anos, segundo o Centro de Controle de Doenças dos EUA. A renda anual máxima de 6 milhões também é extremamente alta, sugerindo possíveis outliers.
+
+Além disso, uma idade de 123 anos é implausível, pois, considerando a expectativa de vida e 12 anos de escolaridade, o tempo máximo de trabalho poderia ser de 65,5 anos. Por outro lado, um tempo de emprego de 0 anos pode ser aceitável em alguns contextos, como para recém-formados.
+
+O intervalo dos valores de empréstimo parece razoável, e as taxas de juros são geralmente adequadas, embora a taxa máxima possa indicar um empréstimo de alto risco. O fato de que até 83% da renda é destinada ao pagamento do empréstimo é preocupante e sugere um elevado risco de inadimplência. Por fim, a duração máxima de 30 anos é aceitável, mas um histórico muito curto pode impactar negativamente a análise de crédito.
+
+```{r warning=FALSE, message=FALSE}
+
+# 2.2) Removendo NAs e outliers, além de definir a variável "status_emprestimo"
+# como tipo "factor"
+base_tratada <- 
+  base_ajustada %>% 
+  stats::na.omit() %>%
+  dplyr::filter(idade <= 77.5,
+                tempo_emprego <= 65.5) %>% 
+  dplyr::mutate(status_emprestimo = as.factor(status_emprestimo))
+
+# 2.3) Estatísticas descritivas para variáveis numéricas após remoção de NAs e
+# outliers
+summary(base_tratada %>% select(idade, renda_anual, tempo_emprego, valor_emprestimo, 
+                                 taxa_juros_emprestimo, percentual_renda_emprestimo, 
+                                 duracao_historico_credito))
+
+# 2.4) Salvando base de dados tratada
+saveRDS(base_tratada, "data/outputs/base_tratada.rds")
+
+```
+
+Agora, a faixa etária demonstra-se adequada, com idade máxima de 76 anos, indicando a remoção de outliers que distorciam as análises. A proximidade entre a média e a mediana sugere uma distribuição simétrica.
+
+A renda anual ainda possui valores elevados, mas menos extremos. A diferença reduzida entre média e mediana indica que a maioria das rendas é moderada, com poucos casos de rendas muito altas. Além disso, o tempo de emprego, variando de 0 a 38 meses, reflete uma diversidade de experiências. A média e a mediana de cerca de 5 anos sugerem que a maioria tem experiência moderada.
+
+Os valores de empréstimo, entre 500 e 35.000, parecem adequados, com média e mediana em torno de 8 a 10 mil, compatíveis com a renda observada. Ademais, as taxas de juros, de 5,42% a 23,22%, com média de 11,04%, são relativamente altas, especialmente para rendas mais baixas, o que pode aumentar o risco de inadimplência.
+
+Por último, a porcentagem de até 83% da renda comprometida com empréstimos é preocupante e indica potencial dificuldade financeira para alguns indivíduos. A duração do histórico de crédito, de 2 a 30 anos, é normal e sugere que muitos têm crédito estabelecido.
+
+# 3) Análise exploratória
+
+```{r warning=FALSE, message=FALSE}
+
+# 3.1) Construindo histogramas para as variáveis relacionadas aos empréstimos
+p1 <- ggplot(base_tratada, aes(x = valor_emprestimo)) + 
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") + 
+  labs(title = "Valor do empréstimo")
+
+p2 <- ggplot(base_tratada, aes(x = taxa_juros_emprestimo)) + 
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  labs(title = "Taxa de juros")
+
+p3 <- ggplot(base_tratada, aes(x = percentual_renda_emprestimo)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") + 
+  labs(title = "Percentual da renda")
+
+p4 <- ggplot(base_tratada, aes(x = duracao_historico_credito)) + 
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  labs(title = "Duração do histórico de crédito")
+
+# 3.2) Exibindo os histogramas
+gridExtra::grid.arrange(
+  arrangeGrob(p1, p2, p3, p4, ncol = 2),
+  top = textGrob("Distribuições das variáveis relacionadas aos empréstimos", gp = gpar(fontsize = 16, fontface = "bold"))
+)
+
+```
+
+Identifica-se que a maioria dos empréstimos concedidos é de valor moderado, com um pico em torno de 10.000 dólares, sendo poucas concessões acima de 20.000 dólares. As taxas de juros se concentram em torno de 10%, com uma distribuição relativamente uniforme, e a maior parte dos mutuários compromete até 20% de sua renda com o empréstimo, com poucos comprometendo mais de 50%. O histórico de crédito dos mutuários é diversificado, variando de 2 a 30 anos, concentrado entre 2 e 10 anos. Essas observações indicam um perfil de mutuário que busca empréstimos acessíveis e tem histórico de crédito variado.
+
+```{r warning=FALSE, message=FALSE}
+
+# 3.3) Construindo gráficos de barras para as variáveis categóricas
+p5 <- ggplot(base_tratada, aes(x = residencia)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Tipos de residência") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p6 <- ggplot(base_tratada, aes(x = intencao_emprestimo)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Intenção de empréstimo") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p7 <- ggplot(base_tratada, aes(x = classificacao_emprestimo)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Classificação de empréstimo")
+
+# 3.4) Exibindo os histogramas
+gridExtra::grid.arrange(
+  arrangeGrob(p5, p6, p7, ncol = 3),
+  top = textGrob("Distribuições das variáveis categóricas", gp = gpar(fontsize = 16, fontface = "bold"))
+)
+
+```
+
+Nota-se que a maioria dos mutuários pagam aluguel ou tem hipoteca sobre sua residência, sendo uma parcela relativamente menor morando em casa própria. As duas principais intenções de empréstimo são educação e médico. A maior parte dos empréstimos está concentrada nas classes A e B, sugerindo uma boa classificação de crédito e baixo risco de inadimplência. Esses dados indicam um perfil de mutuário com relativa estabilidade financeira.
+
+```{r warning=FALSE, message=FALSE}
+
+# 3.5) Preparando dados para a matriz de correlação
+numeric_vars <- 
+  base_tratada %>%
+  dplyr::select(idade, renda_anual, valor_emprestimo, taxa_juros_emprestimo, 
+                percentual_renda_emprestimo, duracao_historico_credito)
+
+# 3.6) Calculando correlação
+cor_matrix <- round(cor(numeric_vars), 2)
+
+# 3.7) Plotando gráfico de correlação
+GGally::ggcorr(numeric_vars, label = TRUE, label_round = 2, hjust = 0.9,
+               low = "red",
+               mid = "#EEEEEE",
+               high = "steelblue",
+               midpoint = 0) + 
+  labs(title = "Matriz de correlação entre variáveis")
+
+```
+
+Percebe-se uma forte correlação entre a idade e a duração do histórico de crédito, indicando que pessoas mais velhas tendem a ter um histórico mais longo. Há também uma correlação positiva moderada entre o valor do empréstimo e a renda anual, além de uma relação semelhante entre o valor do empréstimo e a taxa de juros, sugerindo que pessoas com maior renda solicitam empréstimos mais altos, que costumam ter taxas mais elevadas. Em contrapartida, a taxa de juros não é significativamente influenciada pela duração do histórico de crédito. A única correlação negativa relevante indica que, conforme a renda aumenta, a proporção da renda destinada ao pagamento de empréstimos tende a ser menor, sugerindo uma melhor capacidade de gerenciamento financeiro entre os mutuários com rendas mais altas.
+
+```{r warning=FALSE, message=FALSE}
+
+# 3.8) Plotando boxplot de taxa de juros por classificação de empréstimo
+ggplot(base_tratada, aes(x = classificacao_emprestimo, y = taxa_juros_emprestimo)) +
+  geom_boxplot(fill = "steelblue") +
+  labs(title = "Distribuição de taxa de Juros por classificação de empréstimo", 
+       x = "Classificação de empréstimo", 
+       y = "Taxa de juros (%)")+
+  theme_minimal()
+
+```
+
+Observa-se que a taxa de juros tende a aumentar à medida que a classificação diminui, indicando que empréstimos com classificações mais baixas, como G, estão associados a taxas mais altas, refletindo um maior risco percebido pelos credores. A variação das taxas de juros também aumenta com a diminuição da classificação, sugerindo maior dispersão nos dados, especialmente em empréstimos de maior risco, onde são observados outliers significativos. Essa relação implica que fatores como o histórico de crédito do mutuário, condições do empréstimo e flutuações do mercado podem influenciar a determinação das taxas de juros, reforçando a ideia de que empréstimos mais arriscados apresentam maior heterogeneidade nas taxas aplicadas.
+
+# 4) Regressão Logística
+
+Estima-se um modelo de regressão logística, do qual é apropriado para situações em que a variável dependente é categórica. Neste caso, o status do empréstimo assume dois valores: 0 (inadimplente) e 1 (adimplente). A regressão logística estima a probabilidade de um evento (nesta situação, a adimplência) ocorrer, com base nas variáveis independentes.
+
+```{r warning=FALSE, message=FALSE}
+
+# 4.1) Estimando modelo logístico
+modelo_logistico <- stats::glm(status_emprestimo ~ .,
+                               data = base_tratada,
+                               family = binomial)
+
+# 4.2) Exibindo resumo do modelo
+summary(modelo_logistico)
+
+```
+
+O modelo logístico revela que fatores como renda anual, intenção de empréstimo e classificação de crédito desempenham papéis significativos na probabilidade de aprovação de empréstimos. O aumento da renda anual está positivamente associado à aprovação e, em contraste, a idade, o tempo de emprego e a intenção de solicitar empréstimos para educação ou empreendedorismo têm efeitos negativos, sendo estatisticamente significativos. As classificações de empréstimo D, E, F e G mostram maior probabilidade de aprovação em comparação à classificação A, B e C e o valor do empréstimo solicitado também afeta negativamente a aprovação. A taxa de juros tem uma relação positiva com a aprovação, enquanto o percentual da renda comprometida apresenta um impacto positivo significativo. Por outro lado, o histórico de inadimplência e a duração do histórico de crédito não mostraram efeitos significativos.
+
+# 5) Análise de acurácia
+```{r warning=FALSE, message=FALSE}
+
+# 5.1) Definindo o limite de probabilidade
+limite <- 0.5
+
+# 5.2) Convertendo as probabilidades ajustadas em previsões binárias
+previsoes <- ifelse(modelo_logistico$fitted.values > limite, 1, 0)
+
+# 5.3) Criando a matriz de confusão comparando previsões e valores observados
+matriz_confusao <- table(Previsao = previsoes, Realidade = base_tratada$status_emprestimo)
+
+# 5.4) Exibindo a matriz de confusão
+print(matriz_confusao)
+
+# 5.5) Calculando o percentual de acertos
+acuracia <- sum(diag(matriz_confusao)) / sum(matriz_confusao)
+
+# 5.6) Apresentando acurácia
+cat("Acurácia do modelo de Regressão Logística:", round(acuracia * 100, 2), "%\n")
+
+```
+
+A matriz de confusão revela que o modelo logístico previu corretamente 21.368 casos de inadimplência e 3.480 casos de adimplência. No entanto, houve 2.722 falsos negativos, em que indivíduos adimplentes foram previstos como inadimplentes, e 1.059 falsos positivos, em que inadimplentes foram previstos como adimplentes.
+
+Com uma acurácia de 86,79%, o modelo tem um desempenho geral sólido na classificação do status de empréstimo. Apesar disso, os erros de classificação, especialmente os falsos positivos, podem ter impactos importantes, dependendo das políticas de crédito da instituição, já que podem influenciar decisões financeiras críticas.
